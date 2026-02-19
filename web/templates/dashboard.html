@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - MF Dashboard</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">MF Dashboard</div>
+        <ul class="nav-menu">
+            <li><a href="/dashboard" class="active">Dashboard</a></li>
+            <li><a href="/clients">Clients</a></li>
+            <li><a href="/transactions">Transactions</a></li>
+            <li><a href="/import">Import</a></li>
+            <li><a href="#" id="logoutBtn">Logout</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <div class="header-section">
+            <h1>Portfolio Dashboard</h1>
+            <button class="btn btn-secondary" onclick="refreshNAV(event)">Refresh NAV</button>
+        </div>
+
+        <!-- Market Overview -->
+        <div class="card" style="margin-bottom: 1.5rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h2 style="margin:0;">Market Overview</h2>
+                <span id="marketStatus" style="font-size:0.8rem; color:#94a3b8;"></span>
+            </div>
+            <div id="marketGrid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:1rem;">
+                <div style="color:#64748b; padding:1rem; text-align:center;">Loading market data...</div>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total AUM</h3>
+                <p class="stat-value" id="totalAUM">₹0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Total Clients</h3>
+                <p class="stat-value" id="totalClients">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Total Invested</h3>
+                <p class="stat-value" id="totalInvested">₹0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Overall Returns</h3>
+                <p class="stat-value" id="overallReturns">0%</p>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>Asset Allocation</h2>
+                <canvas id="allocationChart"></canvas>
+            </div>
+
+            <div class="card">
+                <h2>📅 Upcoming SIPs <span id="sipAlertCount" class="badge-blue">0</span></h2>
+                <div id="sipAlerts"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Client Portfolio Summary</h2>
+            <table id="clientsTable">
+                <thead>
+                    <tr>
+                        <th>Client Name</th>
+                        <th>Current Value</th>
+                        <th>Invested</th>
+                        <th>Returns</th>
+                        <th>XIRR</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Top Performing Clients</h2>
+            <table id="topClientsTable">
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Client Name</th>
+                        <th>XIRR</th>
+                        <th>Current Value</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

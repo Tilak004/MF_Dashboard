@@ -1,0 +1,93 @@
+✅ VERIFIED MUTUAL FUND SCHEME CODES (Regular Plan - Growth)
+=================================================================
+Updated: February 12, 2026
+Tested against mfapi.in API
+
+IMPORTANT: All codes below are for REGULAR PLAN - GROWTH OPTION
+
+
+1. SBI Large & Midcap Fund - Regular Plan - Growth
+   ❌ OLD CODE: 120588 (Returns ICICI FMCG Direct Plan - WRONG!)
+   ✅ CORRECT CODE: 103024
+   Verified: https://api.mfapi.in/mf/103024
+
+2. HDFC Balanced Advantage Fund - Growth Plan
+   ✅ CORRECT CODE: 100119
+   Status: Already correct ✓
+
+3. SBI Small Cap Fund - Regular Plan - Growth
+   ❌ OLD CODE: 122639 (Returns Parag Parikh Direct Plan - WRONG!)
+   ✅ CORRECT CODE: 125494
+   Verified: https://api.mfapi.in/mf/125494
+
+4. HDFC Large Cap Fund - Regular Plan - Growth
+   ❌ OLD CODE: 101479 (Returns EMPTY DATA!)
+   ✅ CORRECT CODE: 102000
+   Verified: https://api.mfapi.in/mf/102000
+   Scheme Name: "HDFC Large Cap Fund - Growth Option - Regular Plan"
+
+5. HDFC Mid Cap Fund - Regular Plan - Growth
+   ❌ OLD CODE: 101490 (Returns Tata Young Citizen Fund - WRONG!)
+   ✅ CORRECT CODE: 105758
+   Verified: https://api.mfapi.in/mf/105758
+   Scheme Name: "HDFC Mid Cap Fund - Growth Plan"
+
+6. HDFC Flexi Cap Fund - Regular Plan - Growth
+   ❌ OLD CODE: 101489 (Returns Tata Young Citizen Fund - WRONG!)
+   ✅ CORRECT CODE: 101762
+   Verified: https://api.mfapi.in/mf/101762
+   Scheme Name: "HDFC Flexi Cap Fund - Growth Plan"
+
+7. Nippon India Multi Asset Allocation Fund - Regular Plan - Growth
+   ❌ OLD CODE: 145496 (Returns HDFC FMP - WRONG!)
+   ✅ CORRECT CODE: 148459
+   Verified: https://api.mfapi.in/mf/148459
+   Scheme Name: "Nippon India Multi Asset Allocation Fund - Regular Plan - Growth Option"
+
+8. Axis Gold & Silver FoF - Regular Growth
+   ❌ OLD CODE: 145541 (Returns ICICI Overnight Fund - WRONG!)
+   ⚠️  REMOVED FROM CSV - Fund not found in mfapi.in
+   Note: Only "Axis Gold ETF" (113434) exists, not a FoF
+   Action: Verify fund name and search manually using find_scheme_codes.html
+
+
+=================================================================
+WHAT WAS WRONG:
+=================================================================
+
+❌ 7 out of 8 scheme codes were completely WRONG
+❌ Many returned Direct Plan funds (no distributor commission)
+❌ Some returned completely different funds
+❌ One code (101479) returned EMPTY data
+❌ Future date in CSV: 12/03/2026 (March 12, 2026)
+
+
+=================================================================
+CORRECTED CSV FILE:
+=================================================================
+
+✅ Created: MF Clients - CORRECTED_CODES.csv
+
+Changes made:
+- Fixed all scheme codes with verified codes
+- Changed future date 12/03/2026 → 12/02/2026
+- Removed Axis Gold & Silver FoF row (fund not found)
+
+Import this file to fix all errors!
+
+
+=================================================================
+HOW TO USE:
+=================================================================
+
+1. Delete your old database data (or clear transactions)
+2. Import: MF Clients - CORRECTED_CODES.csv
+3. System will automatically fetch historical NAV
+4. Units will be calculated correctly
+5. Dashboard will show correct XIRR and returns
+
+To clear database (run in psql):
+DELETE FROM transactions;
+DELETE FROM nav_history;
+DELETE FROM funds;
+DELETE FROM clients;

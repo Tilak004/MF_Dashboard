@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transactions - MF Dashboard</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">MF Dashboard</div>
+        <ul class="nav-menu">
+            <li><a href="/dashboard">Dashboard</a></li>
+            <li><a href="/clients">Clients</a></li>
+            <li><a href="/transactions" class="active">Transactions</a></li>
+            <li><a href="/import">Import</a></li>
+            <li><a href="#" id="logoutBtn">Logout</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <div class="header-section">
+            <h1>Transaction Management</h1>
+            <button class="btn btn-primary" onclick="showAddTransactionForm()">Add Transaction</button>
+        </div>
+
+        <div id="addTransactionForm" class="card" style="display:none;">
+            <h2>Add New Transaction</h2>
+            <p class="info-text">Note: Units and NAV will be calculated automatically based on transaction date</p>
+            <form id="transactionForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="clientId">Client *</label>
+                        <select id="clientId" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="fundId">Fund (Scheme Code) *</label>
+                        <input type="text" id="fundSchemeCode" placeholder="Enter scheme code" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="transactionType">Type *</label>
+                        <select id="transactionType" required>
+                            <option value="LUMPSUM">Lumpsum</option>
+                            <option value="SIP">SIP</option>
+                            <option value="REDEMPTION">Redemption</option>
+                            <option value="SWITCH_IN">Switch In</option>
+                            <option value="SWITCH_OUT">Switch Out</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="transactionDate">Date *</label>
+                        <input type="date" id="transactionDate" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="amount">Amount (₹) *</label>
+                        <input type="number" id="amount" step="0.01" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="folioNumber">Folio Number</label>
+                        <input type="text" id="folioNumber">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="notes">Notes</label>
+                    <textarea id="notes" rows="2"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Save Transaction</button>
+                <button type="button" class="btn btn-secondary" onclick="hideAddTransactionForm()">Cancel</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Recent Transactions</h2>
+            <div id="transactionsList"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login';
+        });
+
+        function showAddTransactionForm() {
+            document.getElementById('addTransactionForm').style.display = 'block';
+            loadClientsList();
+        }
+
+        function hideAddTransactionForm() {
+            document.getElementById('addTransactionForm').style.display = 'none';
+            document.getElementById('transactionForm').reset();
+        }
+
+        async function loadClientsList() {
+            const response = await fetch('/api/clients');
+            const clients = await response.json();
+            const select = document.getElementById('clientId');
+            select.innerHTML = '<option value="">Select Client</option>' +
+                clients.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        }
+
+        document.getElementById('transactionForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            alert('Transaction feature requires fund database setup. Please use CSV import for bulk transactions.');
+        });
+
+        async function loadTransactions() {
+            document.getElementById('transactionsList').innerHTML =
+                '<p>Use the Import page to bulk upload transactions via CSV file.</p>';
+        }
+
+        loadTransactions();
+    </script>
+</body>
+</html>

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Import - MF Dashboard</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">MF Dashboard</div>
+        <ul class="nav-menu">
+            <li><a href="/dashboard">Dashboard</a></li>
+            <li><a href="/clients">Clients</a></li>
+            <li><a href="/transactions">Transactions</a></li>
+            <li><a href="/import" class="active">Import</a></li>
+            <li><a href="#" id="logoutBtn">Logout</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <h1>Import Data from CSV</h1>
+
+        <!-- SIP SCHEDULES IMPORT -->
+        <div class="card" style="border-left: 4px solid #10b981;">
+            <h2>🔄 Import SIP Schedules (Recommended First)</h2>
+            <p><strong>For recurring monthly SIPs</strong> - Define once, auto-calculates all installments!</p>
+
+            <div class="form-group">
+                <h3>CSV Format:</h3>
+                <code style="display: block; padding: 10px; background: #1e293b; border-radius: 4px;">
+Client Name,PAN,Fund Name,Scheme Code,Amount,Start Date,Frequency,Day of Month
+                </code>
+            </div>
+
+            <form id="sipUploadForm">
+                <div class="form-group">
+                    <label for="sipCsvFile">Select SIP Schedules CSV</label>
+                    <input type="file" id="sipCsvFile" accept=".csv" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Import SIP Schedules</button>
+            </form>
+            <div id="sipUploadProgress" style="display:none;">
+                <p>⏳ Importing SIP schedules... Please wait</p>
+            </div>
+        </div>
+
+        <div id="sipImportResults" class="card" style="display:none; border-left: 4px solid #10b981;">
+            <h2>SIP Import Results</h2>
+            <div class="stats-row">
+                <div class="stat-item">
+                    <span class="stat-label">Successful:</span>
+                    <span id="sipSuccessCount" class="stat-value-green">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Failed:</span>
+                    <span id="sipFailedCount" class="stat-value-red">0</span>
+                </div>
+            </div>
+            <div id="sipErrorsList"></div>
+        </div>
+
+        <!-- TRANSACTIONS IMPORT -->
+        <div class="card" style="border-left: 4px solid #6366f1;">
+            <h2>📊 Import One-Time Transactions (Lumpsum/Redemptions)</h2>
+            <p><strong>For one-time investments, redemptions, or switches</strong></p>
+
+            <div class="form-group">
+                <h3>CSV Format:</h3>
+                <code style="display: block; padding: 10px; background: #1e293b; border-radius: 4px; font-size: 11px;">
+Client Name,PAN,Email,Phone,Fund Name,Scheme Code,Fund House,Category,Transaction Type,Date,Amount,Folio,Notes
+                </code>
+            </div>
+
+            <form id="txnUploadForm">
+                <div class="form-group">
+                    <label for="txnCsvFile">Select Transactions CSV</label>
+                    <input type="file" id="txnCsvFile" accept=".csv" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Import Transactions</button>
+            </form>
+            <div id="txnUploadProgress" style="display:none;">
+                <p>⏳ Importing transactions... Please wait</p>
+            </div>
+        </div>
+
+        <div id="txnImportResults" class="card" style="display:none; border-left: 4px solid #6366f1;">
+            <h2>Transaction Import Results</h2>
+            <div class="stats-row">
+                <div class="stat-item">
+                    <span class="stat-label">Successful:</span>
+                    <span id="txnSuccessCount" class="stat-value-green">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Failed:</span>
+                    <span id="txnFailedCount" class="stat-value-red">0</span>
+                </div>
+            </div>
+            <div id="txnErrorsList"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login';
+        });
+
+        // SIP Schedules Import
+        document.getElementById('sipUploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('sipCsvFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a CSV file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            document.getElementById('sipUploadProgress').style.display = 'block';
+            document.getElementById('sipImportResults').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/import/sip-schedules', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                document.getElementById('sipUploadProgress').style.display = 'none';
+                document.getElementById('sipImportResults').style.display = 'block';
+
+                document.getElementById('sipSuccessCount').textContent = result.success_count || 0;
+                document.getElementById('sipFailedCount').textContent = result.failed_count || 0;
+
+                const errorsList = document.getElementById('sipErrorsList');
+                if (result.errors && result.errors.length > 0) {
+                    errorsList.innerHTML = '<h3>Errors:</h3><ul>' +
+                        result.errors.map(err => `<li class="error-item">${err}</li>`).join('') +
+                        '</ul>';
+                } else {
+                    errorsList.innerHTML = '<p style="color: #10b981;">✅ All SIP schedules imported successfully!</p>';
+                }
+
+                fileInput.value = '';
+            } catch (error) {
+                alert('Import failed: ' + error.message);
+                document.getElementById('sipUploadProgress').style.display = 'none';
+            }
+        });
+
+        // Transactions Import
+        document.getElementById('txnUploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('txnCsvFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a CSV file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            document.getElementById('txnUploadProgress').style.display = 'block';
+            document.getElementById('txnImportResults').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/import/transactions', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                document.getElementById('txnUploadProgress').style.display = 'none';
+                document.getElementById('txnImportResults').style.display = 'block';
+
+                document.getElementById('txnSuccessCount').textContent = result.success || 0;
+                document.getElementById('txnFailedCount').textContent = result.failed || 0;
+
+                const errorsList = document.getElementById('txnErrorsList');
+                if (result.errors && result.errors.length > 0) {
+                    errorsList.innerHTML = '<h3>Errors:</h3><ul>' +
+                        result.errors.map(err => `<li class="error-item">${err}</li>`).join('') +
+                        '</ul>';
+                } else {
+                    errorsList.innerHTML = '<p style="color: #10b981;">✅ All transactions imported successfully!</p>';
+                }
+
+                fileInput.value = '';
+            } catch (error) {
+                alert('Import failed: ' + error.message);
+                document.getElementById('txnUploadProgress').style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>

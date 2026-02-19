@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Portfolio - MF Dashboard</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">MF Dashboard</div>
+        <ul class="nav-menu">
+            <li><a href="/dashboard">Dashboard</a></li>
+            <li><a href="/clients">Clients</a></li>
+            <li><a href="/transactions">Transactions</a></li>
+            <li><a href="/import">Import</a></li>
+            <li><a href="#" id="logoutBtn">Logout</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <div class="header-section">
+            <div>
+                <a href="/dashboard" style="color: var(--text-muted); text-decoration: none; font-size: 0.8rem;">&larr; Back to Dashboard</a>
+                <h1 id="clientName" style="margin-top: 0.4rem;">Loading Portfolio...</h1>
+                <p id="clientInfo" style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem;"></p>
+            </div>
+            <button class="btn btn-secondary" onclick="refreshAndReload(event)">Refresh NAV &amp; Recalculate</button>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Current Value</h3>
+                <p class="stat-value" id="currentValue">₹0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Total Invested</h3>
+                <p class="stat-value" id="totalInvested">₹0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Absolute Return</h3>
+                <p class="stat-value" id="absoluteReturn">₹0</p>
+            </div>
+            <div class="stat-card">
+                <h3>XIRR</h3>
+                <p class="stat-value" id="overallXIRR">0%</p>
+            </div>
+        </div>
+
+        <!-- Charts Row: Allocation + Goal Planner -->
+        <div class="dashboard-grid" id="chartsRow" style="display:none;">
+
+            <!-- Asset Allocation Pie -->
+            <div class="card">
+                <h2>Asset Allocation</h2>
+                <canvas id="allocationChart"></canvas>
+            </div>
+
+            <!-- Goal Planner -->
+            <div class="card">
+                <h2>Goal Planner</h2>
+
+                <!-- Shows the starting point once portfolio is loaded -->
+                <div id="goalStartingInfo" style="display:none; background:rgba(16,185,129,0.06); border-left:2px solid var(--primary); padding:0.5rem 0.75rem; border-radius:6px; margin-bottom:0.85rem; font-size:0.78rem;">
+                    Starting from <strong id="goalStartingValue">₹0</strong> (current portfolio) · XIRR <strong id="goalXIRR">0%</strong>
+                </div>
+
+                <div class="form-row" style="margin-bottom:0.6rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Target Amount (₹)</label>
+                        <input type="number" id="goalAmount" placeholder="e.g. 1000000" min="1"
+                               onkeydown="if(event.key==='Enter') calculateGoal()">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Monthly SIP (₹) <span style="font-weight:400;color:var(--text-dim);">optional</span></label>
+                        <input type="number" id="monthlySIP" placeholder="e.g. 5000" min="0"
+                               onkeydown="if(event.key==='Enter') calculateGoal()">
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="calculateGoal()" style="margin-bottom:0.75rem;">Calculate</button>
+
+                <div id="goalResult"></div>
+                <canvas id="goalChart" style="display:none; margin-top:0.75rem;"></canvas>
+            </div>
+        </div>
+
+        <!-- Holdings Table -->
+        <div class="card">
+            <h2>Fund Holdings</h2>
+            <div id="holdingsContainer">
+                <div class="loading"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── Module state ────────────────────────────────────────────────
+        let _currentValue = 0;
+        let _overallXIRR  = 0;
+        let _allocationChartInstance = null;
+        let _goalChartInstance = null;
+
+        // ── Helpers ─────────────────────────────────────────────────────
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login';
+        });
+
+        function getClientID() {
+            return new URLSearchParams(window.location.search).get('id');
+        }
+
+        function formatCurrency(amount) {
+            const n = amount || 0;
+            if (n >= 1e7) return '₹' + (n / 1e7).toFixed(2) + ' Cr';
+            if (n >= 1e5) return '₹' + (n / 1e5).toFixed(2) + ' L';
+            return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+        }
+
+        function formatCurrencyRaw(n) {
+            return '₹' + (n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+        }
+
+        function formatPercent(v) { return (v || 0).toFixed(2) + '%'; }
+
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position:fixed; top:20px; right:20px;
+                background:${type==='error'?'#ef4444':type==='success'?'#10b981':'#6366f1'};
+                color:#fff; padding:0.8rem 1.5rem; border-radius:8px;
+                box-shadow:0 10px 30px rgba(0,0,0,0.3); z-index:10000; font-size:0.82rem;`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 4000);
+        }
+
+        // ── Load client info ────────────────────────────────────────────
+        async function loadClientInfo(clientID) {
+            try {
+                const resp = await fetch(`/api/clients/${clientID}`);
+                if (!resp.ok) return;
+                const c = await resp.json();
+                document.getElementById('clientName').textContent = c.name || 'Unknown Client';
+                const info = [c.pan, c.email, c.phone].filter(Boolean).join(' | ');
+                document.getElementById('clientInfo').textContent = info;
+            } catch (err) {
+                console.error('[Portfolio] client info error:', err);
+            }
+        }
+
+        // ── Load portfolio ───────────────────────────────────────────────
+        async function loadPortfolio(clientID) {
+            const container = document.getElementById('holdingsContainer');
+            container.innerHTML = '<div class="loading"></div>';
+
+            try {
+                const resp = await fetch(`/api/clients/${clientID}/portfolio`);
+                if (!resp.ok) {
+                    const txt = await resp.text();
+                    container.innerHTML = `<p style="color:#ef4444;padding:1rem;">Error: ${txt}</p>`;
+                    return;
+                }
+
+                const portfolio = await resp.json();
+                _currentValue = portfolio.current_value || 0;
+                _overallXIRR  = portfolio.overall_xirr  || 0;
+
+                // Update stat cards
+                const absRet = _currentValue - (portfolio.total_invested || 0);
+                const retColor = absRet >= 0 ? 'var(--success)' : 'var(--danger)';
+
+                document.getElementById('currentValue').textContent  = formatCurrencyRaw(_currentValue);
+                document.getElementById('totalInvested').textContent = formatCurrencyRaw(portfolio.total_invested);
+                document.getElementById('absoluteReturn').textContent = formatCurrencyRaw(absRet);
+                document.getElementById('absoluteReturn').style.color = retColor;
+                const xirrEl = document.getElementById('overallXIRR');
+                xirrEl.textContent  = formatPercent(_overallXIRR);
+                xirrEl.style.color  = _overallXIRR >= 0 ? 'var(--success)' : 'var(--danger)';
+
+                const holdings = portfolio.holdings || [];
+
+                // Show charts row only when we have data
+                if (holdings.length > 0) {
+                    document.getElementById('chartsRow').style.display = '';
+                    renderAllocationChart(holdings);
+                    // Populate goal planner starting-point info
+                    document.getElementById('goalStartingInfo').style.display = 'block';
+                    document.getElementById('goalStartingValue').textContent = formatCurrencyRaw(_currentValue);
+                    document.getElementById('goalXIRR').textContent = formatPercent(_overallXIRR);
+                }
+
+                // Render holdings table
+                if (holdings.length === 0) {
+                    container.innerHTML = `<p style="text-align:center;color:#64748b;padding:2rem;">No active holdings.</p>`;
+                    return;
+                }
+
+                container.innerHTML = `
+                    <table id="holdingsTable">
+                        <thead><tr>
+                            <th>Fund Name</th>
+                            <th>Category</th>
+                            <th>Units</th>
+                            <th>NAV</th>
+                            <th>Invested</th>
+                            <th>Current Value</th>
+                            <th>Return</th>
+                            <th>XIRR</th>
+                        </tr></thead>
+                        <tbody>
+                            ${holdings.map((h, i) => {
+                                const ret = (h.current_value||0) - (h.total_invested||0);
+                                const rc  = ret >= 0 ? 'var(--success)' : 'var(--danger)';
+                                const xc  = (h.xirr||0) >= 0 ? 'var(--success)' : 'var(--danger)';
+                                return `<tr style="animation:fadeIn 0.4s ease-out ${i*0.05}s both">
+                                    <td style="font-weight:600">${h.fund_name||'-'}</td>
+                                    <td><span style="background:rgba(16,185,129,0.1);color:var(--primary);padding:0.15rem 0.55rem;border-radius:4px;font-size:0.72rem;font-weight:600">${h.category||'-'}</span></td>
+                                    <td>${(h.total_units||0).toFixed(3)}</td>
+                                    <td>${formatCurrencyRaw(h.current_nav)}</td>
+                                    <td>${formatCurrencyRaw(h.total_invested)}</td>
+                                    <td style="font-weight:600;color:var(--cyan)">${formatCurrencyRaw(h.current_value)}</td>
+                                    <td style="color:${rc};font-weight:600">${formatCurrencyRaw(ret)} ${ret>=0?'▲':'▼'}</td>
+                                    <td style="color:${xc};font-weight:600">${formatPercent(h.xirr)} ${(h.xirr||0)>=0?'▲':'▼'}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>`;
+
+            } catch (err) {
+                console.error('[Portfolio] error:', err);
+                container.innerHTML = `<p style="color:#ef4444;padding:1rem;">Unexpected error: ${err.message}</p>`;
+            }
+        }
+
+        // ── Allocation Pie Chart ─────────────────────────────────────────
+        function renderAllocationChart(holdings) {
+            const categoryMap = {};
+            holdings.forEach(h => {
+                const cat = h.category || 'Other';
+                categoryMap[cat] = (categoryMap[cat] || 0) + (h.current_value || 0);
+            });
+
+            const labels = Object.keys(categoryMap);
+            const values = Object.values(categoryMap);
+
+            if (_allocationChartInstance) _allocationChartInstance.destroy();
+
+            const palette = [
+                'rgba(16,185,129,0.8)',
+                'rgba(245,158,11,0.8)',
+                'rgba(99,102,241,0.8)',
+                'rgba(6,182,212,0.8)',
+                'rgba(239,68,68,0.8)',
+                'rgba(139,92,246,0.8)',
+                'rgba(251,146,60,0.8)',
+            ];
+            const borders = palette.map(c => c.replace('0.8', '1'));
+
+            _allocationChartInstance = new Chart(
+                document.getElementById('allocationChart'), {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{ data: values, backgroundColor: palette.slice(0,labels.length), borderColor: borders.slice(0,labels.length), borderWidth: 2 }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#cbd5e1', padding: 14, font: { size: 11, weight: '500' } } },
+                        tooltip: {
+                            backgroundColor: 'rgba(22,27,34,0.97)',
+                            titleColor: '#fff', bodyColor: '#cbd5e1',
+                            borderColor: 'rgba(16,185,129,0.4)', borderWidth: 1, padding: 10,
+                            callbacks: {
+                                label: ctx => {
+                                    const total = values.reduce((a,b)=>a+b,0);
+                                    const pct = total > 0 ? (ctx.parsed/total*100).toFixed(1) : 0;
+                                    return ` ${ctx.label}: ${formatCurrencyRaw(ctx.parsed)} (${pct}%)`;
+                                }
+                            }
+                        }
+                    },
+                    animation: { animateRotate: true, animateScale: true, duration: 900, easing: 'easeOutQuart' }
+                }
+            });
+        }
+
+        // ── Goal Planner ─────────────────────────────────────────────────
+
+        // Returns months to reach `fv` from `pv` at `annualRate` with optional `monthlyPMT`.
+        // Uses binary search when SIP > 0 (closed-form doesn't exist for mixed case).
+        function monthsToGoal(pv, annualRate, monthlyPMT, fv) {
+            const rm = Math.pow(1 + annualRate, 1 / 12) - 1; // monthly rate
+
+            if (monthlyPMT <= 0) {
+                // Pure compound growth: t = ln(FV/PV) / ln(1+r_annual)
+                return (Math.log(fv / pv) / Math.log(1 + annualRate)) * 12;
+            }
+
+            // FV = PV*(1+rm)^n + PMT*((1+rm)^n - 1)/rm
+            // Binary search for n (months)
+            let lo = 0, hi = 12 * 150;
+            for (let i = 0; i < 300; i++) {
+                const mid = (lo + hi) / 2;
+                const f   = Math.pow(1 + rm, mid);
+                const projected = pv * f + monthlyPMT * (f - 1) / rm;
+                if (projected < fv) lo = mid; else hi = mid;
+                if (hi - lo < 0.01) break;
+            }
+            return (lo + hi) / 2;
+        }
+
+        // Projected portfolio value at month n (with SIP)
+        function projectedValue(pv, annualRate, monthlyPMT, months) {
+            const rm = Math.pow(1 + annualRate, 1 / 12) - 1;
+            const f  = Math.pow(1 + rm, months);
+            return pv * f + (monthlyPMT > 0 ? monthlyPMT * (f - 1) / rm : 0);
+        }
+
+        function fmtTime(months) {
+            const m = Math.round(months);
+            const y = Math.floor(m / 12), mo = m % 12;
+            return y > 0 && mo > 0 ? `${y} yr ${mo} mo` : y > 0 ? `${y} yr` : `${mo} mo`;
+        }
+
+        function calculateGoal() {
+            const goalInput = parseFloat(document.getElementById('goalAmount').value);
+            const sipInput  = parseFloat(document.getElementById('monthlySIP').value) || 0;
+            const resultEl  = document.getElementById('goalResult');
+            const chartCanvas = document.getElementById('goalChart');
+
+            if (!goalInput || goalInput <= 0) {
+                resultEl.innerHTML = `<div class="error-item">Please enter a valid target amount.</div>`;
+                return;
+            }
+            if (_currentValue <= 0) {
+                resultEl.innerHTML = `<div class="error-item">No current portfolio value to project from.</div>`;
+                return;
+            }
+            if (goalInput <= _currentValue && sipInput <= 0) {
+                resultEl.innerHTML = `<div class="info-text" style="color:var(--success)">
+                    Goal already achieved! Current value ${formatCurrencyRaw(_currentValue)} &ge; target ${formatCurrencyRaw(goalInput)}.
+                </div>`;
+                chartCanvas.style.display = 'none';
+                return;
+            }
+
+            const xirr = _overallXIRR / 100;
+            if (xirr <= 0) {
+                resultEl.innerHTML = `<div class="error-item">Cannot project: XIRR is ${formatPercent(_overallXIRR)}. Needs positive returns.</div>`;
+                chartCanvas.style.display = 'none';
+                return;
+            }
+
+            // Without SIP (pure compound from current value)
+            const monthsNoSIP  = monthsToGoal(_currentValue, xirr, 0, goalInput);
+            // With SIP (if user entered one)
+            const monthsWithSIP = sipInput > 0 ? monthsToGoal(_currentValue, xirr, sipInput, goalInput) : null;
+
+            const progress = Math.min((_currentValue / goalInput) * 100, 99).toFixed(1);
+
+            let sipRow = '';
+            if (monthsWithSIP !== null) {
+                sipRow = `
+                <div style="margin-top:0.6rem; padding:0.75rem; background:rgba(245,158,11,0.07); border:1px solid rgba(245,158,11,0.25); border-radius:8px; text-align:center;">
+                    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.2rem;">With ${formatCurrencyRaw(sipInput)}/mo SIP added</div>
+                    <div style="font-size:1.4rem;font-weight:700;color:var(--accent);letter-spacing:-0.02em;">${fmtTime(monthsWithSIP)}</div>
+                    <div style="font-size:0.7rem;color:var(--text-dim);margin-top:0.15rem;">
+                        ${monthsNoSIP > monthsWithSIP ? `${fmtTime(monthsNoSIP - monthsWithSIP)} faster` : 'same pace'}
+                    </div>
+                </div>`;
+            }
+
+            resultEl.innerHTML = `
+                <div style="margin-bottom:0.75rem;">
+                    <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem;">
+                        <span>Now: ${formatCurrencyRaw(_currentValue)}</span>
+                        <span>Goal: ${formatCurrencyRaw(goalInput)}</span>
+                    </div>
+                    <div style="background:rgba(255,255,255,0.07);border-radius:20px;height:8px;overflow:hidden;">
+                        <div style="background:linear-gradient(90deg,var(--primary),var(--accent));height:100%;width:${progress}%;border-radius:20px;transition:width 0.8s ease;"></div>
+                    </div>
+                    <div style="font-size:0.68rem;color:var(--text-dim);margin-top:0.2rem;text-align:right;">${progress}% of goal reached</div>
+                </div>
+                <div style="padding:0.75rem; background:rgba(16,185,129,0.07); border:1px solid var(--border-em); border-radius:8px; text-align:center;">
+                    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.2rem;">Without additional SIP · XIRR ${formatPercent(_overallXIRR)}</div>
+                    <div style="font-size:1.55rem;font-weight:700;color:var(--primary);letter-spacing:-0.02em;">${fmtTime(monthsNoSIP)}</div>
+                    <div style="font-size:0.7rem;color:var(--text-dim);margin-top:0.15rem;">~${(monthsNoSIP/12).toFixed(1)} years from today</div>
+                </div>
+                ${sipRow}`;
+
+            renderGoalChart(goalInput, monthsNoSIP, sipInput, monthsWithSIP);
+        }
+
+        function renderGoalChart(goalAmount, monthsNoSIP, monthlySIP, monthsWithSIP) {
+            const chartCanvas = document.getElementById('goalChart');
+            chartCanvas.style.display = 'block';
+
+            const xirr    = _overallXIRR / 100;
+            const maxMos  = Math.ceil(Math.max(monthsNoSIP, monthsWithSIP || 0)) + 12;
+            const maxYears = Math.ceil(maxMos / 12);
+            const now     = new Date().getFullYear();
+
+            const labels = [], noSIPVals = [], sipVals = [];
+            for (let y = 0; y <= maxYears; y++) {
+                labels.push((now + y).toString());
+                noSIPVals.push(Math.round(projectedValue(_currentValue, xirr, 0,         y * 12)));
+                if (monthlySIP > 0)
+                    sipVals.push(Math.round(projectedValue(_currentValue, xirr, monthlySIP, y * 12)));
+            }
+
+            if (_goalChartInstance) _goalChartInstance.destroy();
+
+            const datasets = [
+                {
+                    label: 'Without SIP',
+                    data: noSIPVals,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16,185,129,0.07)',
+                    fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#10b981',
+                },
+                {
+                    label: 'Goal',
+                    data: new Array(labels.length).fill(goalAmount),
+                    borderColor: '#f59e0b', borderDash: [6,3], borderWidth: 1.5,
+                    pointRadius: 0, fill: false,
+                }
+            ];
+
+            if (monthlySIP > 0) {
+                datasets.splice(1, 0, {
+                    label: `With ₹${monthlySIP.toLocaleString('en-IN')}/mo SIP`,
+                    data: sipVals,
+                    borderColor: '#06b6d4',
+                    backgroundColor: 'rgba(6,182,212,0.07)',
+                    fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#06b6d4',
+                });
+            }
+
+            const yFmt = v => v >= 1e7 ? '₹'+(v/1e7).toFixed(1)+'Cr' : v >= 1e5 ? '₹'+(v/1e5).toFixed(1)+'L' : '₹'+v.toLocaleString('en-IN');
+
+            _goalChartInstance = new Chart(chartCanvas, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true, maintainAspectRatio: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 } } },
+                        tooltip: {
+                            backgroundColor: 'rgba(22,27,34,0.97)',
+                            titleColor: '#fff', bodyColor: '#cbd5e1',
+                            borderColor: 'rgba(16,185,129,0.3)', borderWidth: 1, padding: 10,
+                            callbacks: { label: ctx => ` ${ctx.dataset.label}: ${yFmt(ctx.parsed.y)}` }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                        y: { ticks: { color: '#6b7280', font: { size: 10 }, callback: yFmt }, grid: { color: 'rgba(255,255,255,0.04)' } }
+                    }
+                }
+            });
+        }
+
+        // ── Refresh NAV ──────────────────────────────────────────────────
+        async function refreshAndReload(event) {
+            const btn = event.target;
+            const orig = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Refreshing...';
+            try {
+                const resp = await fetch('/api/dashboard/refresh-nav', { method: 'POST' });
+                if (resp.ok) {
+                    const r = await resp.json();
+                    showToast(`NAV refreshed (${r.fetched_count}/${r.total_count} funds). Recalculating...`, 'success');
+                    const id = getClientID();
+                    if (id) await loadPortfolio(id);
+                } else {
+                    showToast('NAV refresh failed: ' + await resp.text(), 'error');
+                }
+            } catch (err) {
+                showToast('NAV refresh failed: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = orig;
+            }
+        }
+
+        // ── Init ─────────────────────────────────────────────────────────
+        (async function init() {
+            const id = getClientID();
+            if (!id) {
+                document.getElementById('clientName').textContent = 'Error: No client selected';
+                document.getElementById('holdingsContainer').innerHTML =
+                    '<p style="color:#ef4444;padding:1rem;">No client ID. <a href="/dashboard" style="color:var(--primary)">Go back</a>.</p>';
+                return;
+            }
+            await Promise.all([loadClientInfo(id), loadPortfolio(id)]);
+        })();
+    </script>
+</body>
+</html>

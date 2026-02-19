@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clients - MF Dashboard</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">MF Dashboard</div>
+        <ul class="nav-menu">
+            <li><a href="/dashboard">Dashboard</a></li>
+            <li><a href="/clients" class="active">Clients</a></li>
+            <li><a href="/transactions">Transactions</a></li>
+            <li><a href="/import">Import</a></li>
+            <li><a href="#" id="logoutBtn">Logout</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <div class="header-section">
+            <h1>Client Management</h1>
+            <button class="btn btn-primary" onclick="showAddClientForm()">Add New Client</button>
+        </div>
+
+        <div id="addClientForm" class="card" style="display:none;">
+            <h2>Add New Client</h2>
+            <form id="clientForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="name">Client Name *</label>
+                        <input type="text" id="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="pan">PAN</label>
+                        <input type="text" id="pan" maxlength="10">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="email">Email</label>
+                        <input type="email" id="email">
+                    </div>
+                    <div class="form-group">
+                        <label for="phone">Phone</label>
+                        <input type="tel" id="phone">
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Save Client</button>
+                <button type="button" class="btn btn-secondary" onclick="hideAddClientForm()">Cancel</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>All Clients</h2>
+            <table id="clientsTable">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>PAN</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login';
+        });
+
+        function showAddClientForm() {
+            document.getElementById('addClientForm').style.display = 'block';
+        }
+
+        function hideAddClientForm() {
+            document.getElementById('addClientForm').style.display = 'none';
+            document.getElementById('clientForm').reset();
+        }
+
+        document.getElementById('clientForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const client = {
+                name: document.getElementById('name').value,
+                pan: document.getElementById('pan').value.toUpperCase(),
+                email: document.getElementById('email').value,
+                phone: document.getElementById('phone').value
+            };
+
+            const response = await fetch('/api/clients', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(client)
+            });
+
+            if (response.ok) {
+                hideAddClientForm();
+                loadClients();
+            }
+        });
+
+        async function loadClients() {
+            const response = await fetch('/api/clients');
+            const clients = await response.json();
+            const tbody = document.querySelector('#clientsTable tbody');
+            tbody.innerHTML = clients.map(c => `
+                <tr>
+                    <td>${c.name}</td>
+                    <td>${c.pan || '-'}</td>
+                    <td>${c.email || '-'}</td>
+                    <td>${c.phone || '-'}</td>
+                    <td>
+                        <a href="/client-portfolio?id=${c.id}" class="btn btn-sm btn-primary" style="text-decoration: none; padding: 0.4rem 0.8rem;">View Portfolio</a>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        loadClients();
+    </script>
+</body>
+</html>
