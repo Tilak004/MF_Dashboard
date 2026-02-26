@@ -6,6 +6,8 @@
     <title>Client Portfolio - MF Dashboard</title>
     <link rel="stylesheet" href="/static/css/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -26,7 +28,10 @@
                 <h1 id="clientName" style="margin-top: 0.4rem;">Loading Portfolio...</h1>
                 <p id="clientInfo" style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem;"></p>
             </div>
-            <button class="btn btn-secondary" onclick="refreshAndReload(event)">Refresh NAV &amp; Recalculate</button>
+            <div style="display:flex; gap:0.6rem; align-items:center;">
+                <button class="btn btn-secondary" onclick="refreshAndReload(event)">Refresh NAV &amp; Recalculate</button>
+                <button class="btn btn-primary" id="downloadPDF" onclick="generatePDF()">Download PDF</button>
+            </div>
         </div>
 
         <!-- Summary Cards -->
@@ -86,6 +91,64 @@
             </div>
         </div>
 
+        <!-- Growth Projection -->
+        <div class="card" id="growthCard" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.25rem;">
+                <h2 style="margin:0;">Growth Projection</h2>
+                <span style="font-size:0.72rem; color:var(--text-muted);">How your portfolio grows over time</span>
+            </div>
+
+            <!-- Input row -->
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.25rem; margin:1.25rem 0 1.5rem;">
+                <div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;">
+                        <label style="font-size:0.78rem; color:var(--text-muted); font-weight:600;">Time Period</label>
+                        <span id="growthYearsLabel" style="font-size:0.82rem; font-weight:800; color:var(--primary);">10 years</span>
+                    </div>
+                    <input type="range" id="growthYears" min="1" max="30" value="10"
+                           style="width:100%; accent-color:var(--primary); cursor:pointer;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.62rem; color:var(--text-dim); margin-top:0.3rem;">
+                        <span>1 yr</span><span>10</span><span>20</span><span>30 yr</span>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Extra Monthly SIP (Rs.) <span style="font-weight:400; color:var(--text-dim);">optional</span></label>
+                    <input type="number" id="growthSIP" placeholder="0" min="0" value="0">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Expected Return (% p.a.)</label>
+                    <input type="number" id="growthRate" step="0.1" min="0.1" placeholder="e.g. 12">
+                </div>
+            </div>
+
+            <!-- Charts + result -->
+            <div id="growthResult" style="display:grid; grid-template-columns:230px 1fr; gap:1.5rem; align-items:start;">
+                <!-- Left: donut + stat boxes -->
+                <div>
+                    <canvas id="growthDonut" style="max-height:195px;"></canvas>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-top:0.85rem;">
+                        <div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); border-radius:8px; padding:0.6rem; text-align:center;">
+                            <div style="font-size:0.6rem; color:#94a3b8; letter-spacing:0.06em; margin-bottom:0.25rem;">INVESTED</div>
+                            <div id="growthInvested" style="font-size:0.82rem; font-weight:700; color:#818cf8;">—</div>
+                        </div>
+                        <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); border-radius:8px; padding:0.6rem; text-align:center;">
+                            <div style="font-size:0.6rem; color:#94a3b8; letter-spacing:0.06em; margin-bottom:0.25rem;">EST. GAINS</div>
+                            <div id="growthReturns" style="font-size:0.82rem; font-weight:700; color:#10b981;">—</div>
+                        </div>
+                    </div>
+                    <div style="background:linear-gradient(135deg,rgba(16,185,129,0.1),rgba(99,102,241,0.1)); border:1px solid rgba(16,185,129,0.22); border-radius:10px; padding:0.9rem; text-align:center; margin-top:0.5rem;">
+                        <div style="font-size:0.6rem; color:#94a3b8; letter-spacing:0.08em; margin-bottom:0.3rem;">PROJECTED VALUE</div>
+                        <div id="growthProjected" style="font-size:1.55rem; font-weight:800; color:var(--primary); letter-spacing:-0.02em;">—</div>
+                        <div id="growthMultiple" style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem;"></div>
+                    </div>
+                </div>
+                <!-- Right: line chart -->
+                <div>
+                    <canvas id="growthLine" style="max-height:340px;"></canvas>
+                </div>
+            </div>
+        </div>
+
         <!-- Holdings Table -->
         <div class="card">
             <h2>Fund Holdings</h2>
@@ -97,10 +160,19 @@
 
     <script>
         // ── Module state ────────────────────────────────────────────────
+        let _clientName   = '';
+        let _clientInfo   = '';
         let _currentValue = 0;
+        let _totalInvested = 0;
         let _overallXIRR  = 0;
+        let _holdings     = [];
+        let _goalData     = null; // set by calculateGoal()
         let _allocationChartInstance = null;
         let _goalChartInstance = null;
+        let _sipSchedules = [];
+        let _marketData   = [];
+        let _growthDonutInst = null;
+        let _growthLineInst  = null;
 
         // ── Helpers ─────────────────────────────────────────────────────
         document.getElementById('logoutBtn').addEventListener('click', async () => {
@@ -143,9 +215,10 @@
                 const resp = await fetch(`/api/clients/${clientID}`);
                 if (!resp.ok) return;
                 const c = await resp.json();
-                document.getElementById('clientName').textContent = c.name || 'Unknown Client';
-                const info = [c.pan, c.email, c.phone].filter(Boolean).join(' | ');
-                document.getElementById('clientInfo').textContent = info;
+                _clientName = c.name || 'Unknown Client';
+                _clientInfo = [c.pan, c.email, c.phone].filter(Boolean).join(' | ');
+                document.getElementById('clientName').textContent = _clientName;
+                document.getElementById('clientInfo').textContent = _clientInfo;
             } catch (err) {
                 console.error('[Portfolio] client info error:', err);
             }
@@ -165,8 +238,10 @@
                 }
 
                 const portfolio = await resp.json();
-                _currentValue = portfolio.current_value || 0;
-                _overallXIRR  = portfolio.overall_xirr  || 0;
+                _currentValue  = portfolio.current_value  || 0;
+                _totalInvested = portfolio.total_invested || 0;
+                _overallXIRR   = portfolio.overall_xirr   || 0;
+                _holdings      = portfolio.holdings        || [];
 
                 // Update stat cards
                 const absRet = _currentValue - (portfolio.total_invested || 0);
@@ -190,6 +265,7 @@
                     document.getElementById('goalStartingInfo').style.display = 'block';
                     document.getElementById('goalStartingValue').textContent = formatCurrencyRaw(_currentValue);
                     document.getElementById('goalXIRR').textContent = formatPercent(_overallXIRR);
+                    initGrowthCalculator();
                 }
 
                 // Render holdings table
@@ -393,6 +469,15 @@
                 </div>
                 ${sipRow}`;
 
+            // Save for PDF
+            _goalData = {
+                goalAmount: goalInput,
+                monthsNoSIP,
+                monthsWithSIP,
+                sipInput,
+                progress: parseFloat(progress),
+            };
+
             renderGoalChart(goalInput, monthsNoSIP, sipInput, monthsWithSIP);
         }
 
@@ -466,6 +551,160 @@
             });
         }
 
+        // ── Growth Projection ────────────────────────────────────────────
+        function initGrowthCalculator() {
+            const card    = document.getElementById('growthCard');
+            const slider  = document.getElementById('growthYears');
+            const label   = document.getElementById('growthYearsLabel');
+            const rateEl  = document.getElementById('growthRate');
+            const sipEl   = document.getElementById('growthSIP');
+
+            // Pre-fill rate from current XIRR
+            rateEl.value = Math.max(_overallXIRR, 1).toFixed(1);
+            card.style.display = '';
+
+            const refresh = () => {
+                const y = slider.value;
+                label.textContent = y + (y == 1 ? ' year' : ' years');
+                calculateGrowth();
+            };
+
+            slider.addEventListener('input', refresh);
+            rateEl.addEventListener('input', calculateGrowth);
+            sipEl.addEventListener('input', calculateGrowth);
+
+            refresh(); // initial render
+        }
+
+        function calculateGrowth() {
+            const years  = parseInt(document.getElementById('growthYears').value) || 10;
+            const sip    = parseFloat(document.getElementById('growthSIP').value)  || 0;
+            const rate   = parseFloat(document.getElementById('growthRate').value) / 100;
+
+            if (!rate || rate <= 0 || _currentValue <= 0) return;
+
+            const months       = years * 12;
+            const projVal      = projectedValue(_currentValue, rate, sip, months);
+            const totalInvest  = _currentValue + sip * months;
+            const estGains     = projVal - totalInvest;
+            const multiple     = totalInvest > 0 ? (projVal / totalInvest) : 1;
+
+            document.getElementById('growthProjected').textContent = formatCurrency(projVal);
+            document.getElementById('growthInvested').textContent  = formatCurrency(totalInvest);
+            document.getElementById('growthReturns').textContent   = formatCurrency(estGains);
+            document.getElementById('growthMultiple').textContent  =
+                multiple.toFixed(2) + 'x growth · ' + ((multiple - 1) * 100).toFixed(0) + '% total return';
+
+            renderGrowthDonut(totalInvest, estGains);
+            renderGrowthLine(years, rate, sip);
+        }
+
+        function renderGrowthDonut(invested, gains) {
+            const ctx = document.getElementById('growthDonut');
+            if (_growthDonutInst) _growthDonutInst.destroy();
+            _growthDonutInst = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Invested Amount', 'Est. Gains'],
+                    datasets: [{
+                        data: [Math.max(invested, 0), Math.max(gains, 0)],
+                        backgroundColor: ['rgba(99,102,241,0.8)', 'rgba(16,185,129,0.8)'],
+                        borderColor:     ['rgba(99,102,241,1)',   'rgba(16,185,129,1)'],
+                        borderWidth: 2,
+                        hoverOffset: 6,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    cutout: '65%',
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 }, padding: 12 } },
+                        tooltip: {
+                            backgroundColor: 'rgba(22,27,34,0.97)',
+                            titleColor: '#fff', bodyColor: '#cbd5e1',
+                            borderColor: 'rgba(16,185,129,0.3)', borderWidth: 1, padding: 10,
+                            callbacks: { label: ctx => ` ${ctx.label}: ${formatCurrency(ctx.parsed)}` }
+                        }
+                    },
+                    animation: { animateRotate: true, animateScale: true, duration: 700 }
+                }
+            });
+        }
+
+        function renderGrowthLine(years, rate, monthlySIP) {
+            const ctx = document.getElementById('growthLine');
+            if (_growthLineInst) _growthLineInst.destroy();
+
+            const now    = new Date().getFullYear();
+            const labels = [], portVals = [], investVals = [];
+            for (let y = 0; y <= years; y++) {
+                labels.push(now + y);
+                portVals.push(Math.round(projectedValue(_currentValue, rate, monthlySIP, y * 12)));
+                investVals.push(Math.round(_currentValue + monthlySIP * y * 12));
+            }
+
+            const yFmt = v => v >= 1e7 ? '₹'+(v/1e7).toFixed(1)+'Cr'
+                             : v >= 1e5 ? '₹'+(v/1e5).toFixed(1)+'L'
+                             : '₹'+v.toLocaleString('en-IN');
+
+            _growthLineInst = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Portfolio Value',
+                            data: portVals,
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16,185,129,0.1)',
+                            fill: true, tension: 0.4,
+                            pointRadius: 3, pointBackgroundColor: '#10b981',
+                            borderWidth: 2.5,
+                        },
+                        {
+                            label: 'Amount Invested',
+                            data: investVals,
+                            borderColor: '#6366f1',
+                            backgroundColor: 'rgba(99,102,241,0.07)',
+                            fill: true, tension: 0,
+                            pointRadius: 0, borderDash: [5, 3],
+                            borderWidth: 1.5,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            align: 'end',
+                            labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 16 }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(22,27,34,0.97)',
+                            titleColor: '#fff', bodyColor: '#cbd5e1',
+                            borderColor: 'rgba(16,185,129,0.3)', borderWidth: 1, padding: 10,
+                            callbacks: {
+                                title: items => items[0].label + ' · ' + (parseInt(items[0].label) - new Date().getFullYear()) + ' yrs from now',
+                                label: ctx => ` ${ctx.dataset.label}: ${yFmt(ctx.parsed.y)}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                        y: {
+                            ticks: { color: '#6b7280', font: { size: 10 }, callback: yFmt },
+                            grid: { color: 'rgba(255,255,255,0.05)' }
+                        }
+                    },
+                    animation: { duration: 500, easing: 'easeOutQuart' }
+                }
+            });
+        }
+
         // ── Refresh NAV ──────────────────────────────────────────────────
         async function refreshAndReload(event) {
             const btn = event.target;
@@ -490,6 +729,510 @@
             }
         }
 
+        // ── PDF Generation ───────────────────────────────────────────────
+        async function generatePDF() {
+            if (!window.jspdf) {
+                showToast('PDF library not ready — try again in a moment.', 'error');
+                return;
+            }
+            const btn = document.getElementById('downloadPDF');
+            btn.disabled = true;
+            btn.textContent = 'Generating...';
+
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('p', 'mm', 'a4');
+                const W = 210, M = 14, CW = 210 - 2 * M;
+                let y = 0;
+
+                // Colour palette (usable in PDF = RGB arrays)
+                const BG   = [13, 17, 23];
+                const CARD = [22, 27, 34];
+                const PRI  = [16, 185, 129];   // emerald
+                const ACC  = [245, 158, 11];   // amber
+                const RED  = [239, 68, 68];
+                const TXT  = [230, 237, 243];
+                const MUT  = [100, 116, 139];
+                const DIM  = [72, 79, 88];
+                const BLK  = [20, 20, 30];     // near-black body text
+                const LBG  = [247, 249, 251];  // light card bg
+                const LBR  = [220, 228, 236];  // light border
+
+                const today = new Date().toLocaleDateString('en-IN',
+                    { day: '2-digit', month: 'long', year: 'numeric' });
+                const absRet = _currentValue - _totalInvested;
+
+                // jsPDF helvetica cannot render ₹ (U+20B9) — use Rs. throughout the PDF
+                const formatCurrencyRaw = n => 'Rs.' + (n||0).toLocaleString('en-IN', {maximumFractionDigits:0});
+
+                // ── HEADER ────────────────────────────────────────────────
+                doc.setFillColor(...BG);
+                doc.rect(0, 0, W, 40, 'F');
+                // Emerald bottom accent
+                doc.setFillColor(...PRI);
+                doc.rect(0, 38, W, 2, 'F');
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(8);
+                doc.setTextColor(...PRI);
+                doc.text('MF DASHBOARD', M, 10);
+
+                doc.setFontSize(20);
+                doc.setTextColor(...TXT);
+                doc.text('Portfolio Report', M, 23);
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(...MUT);
+                doc.text('As of ' + today, M, 31);
+
+                // Client name (right-aligned)
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(13);
+                doc.setTextColor(...TXT);
+                doc.text(_clientName, W - M, 20, { align: 'right' });
+                if (_clientInfo) {
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(...MUT);
+                    doc.text(_clientInfo, W - M, 28, { align: 'right' });
+                }
+
+                y = 50;
+
+                // ── PORTFOLIO SUMMARY ─────────────────────────────────────
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(7.5);
+                doc.setTextColor(...MUT);
+                doc.text('PORTFOLIO SUMMARY', M, y);
+                doc.setDrawColor(...PRI);
+                doc.setLineWidth(0.4);
+                doc.line(M, y + 1.5, M + 42, y + 1.5);
+                y += 6;
+
+                const bW = (CW - 9) / 4, bH = 20;
+                const statCards = [
+                    { label: 'CURRENT VALUE',   val: formatCurrencyRaw(_currentValue),  color: PRI },
+                    { label: 'TOTAL INVESTED',  val: formatCurrencyRaw(_totalInvested), color: BLK },
+                    { label: 'ABSOLUTE RETURN', val: formatCurrencyRaw(absRet),          color: absRet >= 0 ? PRI : RED },
+                    { label: 'XIRR (ANNUALISED)',val: formatPercent(_overallXIRR),       color: _overallXIRR >= 0 ? PRI : RED },
+                ];
+
+                statCards.forEach((s, i) => {
+                    const bx = M + i * (bW + 3);
+                    doc.setFillColor(...LBG);
+                    doc.roundedRect(bx, y, bW, bH, 2, 2, 'F');
+                    doc.setDrawColor(...LBR);
+                    doc.setLineWidth(0.25);
+                    doc.roundedRect(bx, y, bW, bH, 2, 2, 'S');
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(6);
+                    doc.setTextColor(...MUT);
+                    doc.text(s.label, bx + bW / 2, y + 5.5, { align: 'center' });
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(9.5);
+                    doc.setTextColor(...s.color);
+                    doc.text(s.val, bx + bW / 2, y + 14, { align: 'center' });
+                });
+                y += bH + 10;
+
+                // ── TWO-COLUMN: CHART + HOLDINGS ─────────────────────────
+                // Asset allocation chart (left column, 75mm wide)
+                const chartCanvas = document.getElementById('allocationChart');
+                if (chartCanvas && _allocationChartInstance) {
+                    const chartImg = chartCanvas.toDataURL('image/png', 1.0);
+                    const colL = M, colR = M + 80, colRW = CW - 80;
+
+                    // Section label
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(7.5);
+                    doc.setTextColor(...MUT);
+                    doc.text('ASSET ALLOCATION', colL, y);
+                    doc.setDrawColor(...PRI);
+                    doc.setLineWidth(0.4);
+                    doc.line(colL, y + 1.5, colL + 42, y + 1.5);
+
+                    doc.addImage(chartImg, 'PNG', colL, y + 4, 74, 65);
+
+                    // Holdings legend on the right
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(7.5);
+                    doc.setTextColor(...MUT);
+                    doc.text('HOLDINGS BREAKDOWN', colR, y);
+                    doc.setDrawColor(...PRI);
+                    doc.line(colR, y + 1.5, colR + 42, y + 1.5);
+
+                    const palette = ['#10b981','#f59e0b','#6366f1','#06b6d4','#ef4444','#8b5cf6','#fb923c'];
+                    let ly = y + 7;
+                    const total = _holdings.reduce((s, h) => s + (h.current_value || 0), 0);
+                    const catMap = {};
+                    _holdings.forEach(h => {
+                        const c = h.category || 'Other';
+                        catMap[c] = (catMap[c] || 0) + (h.current_value || 0);
+                    });
+                    Object.entries(catMap).forEach(([cat, val], ci) => {
+                        const pct = total > 0 ? (val / total * 100).toFixed(1) : 0;
+                        const hex = palette[ci % palette.length];
+                        const rgb = [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+                        doc.setFillColor(...rgb);
+                        doc.roundedRect(colR, ly - 2.5, 3.5, 3.5, 0.5, 0.5, 'F');
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(8);
+                        doc.setTextColor(...BLK);
+                        doc.text(`${cat}`, colR + 5.5, ly);
+                        doc.setFont('helvetica', 'bold');
+                        doc.setTextColor(...PRI);
+                        doc.text(`${pct}%`, W - M, ly, { align: 'right' });
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(7);
+                        doc.setTextColor(...MUT);
+                        doc.text(formatCurrencyRaw(val), W - M, ly + 4, { align: 'right' });
+                        ly += 11;
+                    });
+
+                    y += 73;
+                }
+
+                y += 6;
+
+                // ── FUND HOLDINGS TABLE ───────────────────────────────────
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(7.5);
+                doc.setTextColor(...MUT);
+                doc.text('FUND HOLDINGS', M, y);
+                doc.setDrawColor(...PRI);
+                doc.setLineWidth(0.4);
+                doc.line(M, y + 1.5, M + 36, y + 1.5);
+                y += 5;
+
+                doc.autoTable({
+                    startY: y,
+                    head: [['Fund Name', 'Category', 'Units', 'Invested', 'Current Value', 'Return', 'XIRR']],
+                    body: _holdings.map(h => {
+                        const ret = (h.current_value || 0) - (h.total_invested || 0);
+                        return [
+                            h.fund_name || '-',
+                            h.category  || '-',
+                            (h.total_units || 0).toFixed(3),
+                            formatCurrencyRaw(h.total_invested),
+                            formatCurrencyRaw(h.current_value),
+                            (ret >= 0 ? '+' : '') + formatCurrencyRaw(ret),
+                            formatPercent(h.xirr),
+                        ];
+                    }),
+                    styles: { fontSize: 7.5, cellPadding: 2.8, textColor: BLK },
+                    headStyles: { fillColor: CARD, textColor: MUT, fontStyle: 'bold', fontSize: 6.5 },
+                    alternateRowStyles: { fillColor: LBG },
+                    columnStyles: {
+                        0: { cellWidth: 58 },
+                        1: { cellWidth: 22 },
+                        2: { cellWidth: 18, halign: 'right' },
+                        3: { cellWidth: 22, halign: 'right' },
+                        4: { cellWidth: 24, halign: 'right' },
+                        5: { cellWidth: 18, halign: 'right' },
+                        6: { cellWidth: 18, halign: 'right' },
+                    },
+                    margin: { left: M, right: M },
+                    didParseCell: (data) => {
+                        if (data.section === 'body') {
+                            if (data.column.index === 5 || data.column.index === 6) {
+                                const v = data.cell.raw || '';
+                                if (v.startsWith('+') || (!v.startsWith('-') && parseFloat(v) > 0)) {
+                                    data.cell.styles.textColor = PRI;
+                                } else if (v.startsWith('-')) {
+                                    data.cell.styles.textColor = RED;
+                                }
+                            }
+                        }
+                    },
+                });
+
+                y = doc.lastAutoTable.finalY + 8;
+
+                // ── SIP ANALYSIS ──────────────────────────────────────────
+                const activeSIPs = (_sipSchedules || []).filter(s => s.is_active);
+                if (activeSIPs.length > 0) {
+                    if (y > 225) { doc.addPage(); y = 20; }
+
+                    // Build fund_id → fund_name from holdings
+                    const fundMap = {};
+                    _holdings.forEach(h => { if (h.fund_id) fundMap[h.fund_id] = h.fund_name; });
+
+                    // Totals
+                    const monthlyCommit = activeSIPs.reduce((s, x) =>
+                        s + (x.frequency === 'QUARTERLY' ? x.amount / 3 : x.amount), 0);
+                    const annualCommit  = activeSIPs.reduce((s, x) =>
+                        s + (x.frequency === 'QUARTERLY' ? x.amount * 4 : x.amount * 12), 0);
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(7.5);
+                    doc.setTextColor(...MUT);
+                    doc.text('SIP ANALYSIS', M, y);
+                    doc.setDrawColor(...ACC);
+                    doc.setLineWidth(0.4);
+                    doc.line(M, y + 1.5, M + 28, y + 1.5);
+                    y += 4;
+
+                    // Summary strip
+                    doc.setFillColor(255, 251, 235);   // warm cream
+                    doc.roundedRect(M, y, CW, 11, 2, 2, 'F');
+                    doc.setDrawColor(253, 230, 138);
+                    doc.setLineWidth(0.25);
+                    doc.roundedRect(M, y, CW, 11, 2, 2, 'S');
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(7.5);
+                    doc.setTextColor(...BLK);
+                    doc.text(`${activeSIPs.length} Active SIP${activeSIPs.length > 1 ? 's' : ''}`, M + 4, y + 7);
+
+                    doc.setTextColor(...[180, 100, 0]);
+                    doc.text(`Monthly Commitment: ${formatCurrencyRaw(monthlyCommit)}`, M + CW / 3, y + 7);
+                    doc.text(`Annual: ${formatCurrencyRaw(annualCommit)}`, M + CW * 2 / 3, y + 7);
+                    y += 15;
+
+                    const ordinal = n => n + (n===1?'st':n===2?'nd':n===3?'rd':'th');
+
+                    doc.autoTable({
+                        startY: y,
+                        head: [['Fund Name', 'Amount', 'Freq', 'Day', 'Start Date', 'Status']],
+                        body: activeSIPs.map(s => {
+                            const fname  = fundMap[s.fund_id] || ('Fund #' + s.fund_id);
+                            const sdate  = new Date(s.start_date)
+                                .toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+                            return [fname, formatCurrencyRaw(s.amount),
+                                    s.frequency, ordinal(s.day_of_month), sdate,
+                                    s.is_active ? 'Active' : 'Inactive'];
+                        }),
+                        styles:            { fontSize: 7.5, cellPadding: 2.8, textColor: BLK },
+                        headStyles:        { fillColor: CARD, textColor: MUT, fontStyle: 'bold', fontSize: 6.5 },
+                        alternateRowStyles:{ fillColor: LBG },
+                        columnStyles: {
+                            0: { cellWidth: 64 },
+                            1: { cellWidth: 24, halign: 'right' },
+                            2: { cellWidth: 22, halign: 'center' },
+                            3: { cellWidth: 14, halign: 'center' },
+                            4: { cellWidth: 32, halign: 'center' },
+                            5: { cellWidth: 26, halign: 'center' },
+                        },
+                        margin: { left: M, right: M },
+                        didParseCell: (data) => {
+                            if (data.section === 'body' && data.column.index === 5) {
+                                data.cell.styles.textColor = data.cell.raw === 'Active' ? PRI : RED;
+                                data.cell.styles.fontStyle = 'bold';
+                            }
+                        },
+                    });
+                    y = doc.lastAutoTable.finalY + 8;
+                }
+
+                // ── MARKET OVERVIEW ───────────────────────────────────────
+                if (_marketData && _marketData.length > 0) {
+                    if (y > 240) { doc.addPage(); y = 20; }
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(7.5);
+                    doc.setTextColor(...MUT);
+                    doc.text('MARKET OVERVIEW', M, y);
+                    doc.setDrawColor(...PRI);
+                    doc.setLineWidth(0.4);
+                    doc.line(M, y + 1.5, M + 38, y + 1.5);
+                    y += 5;
+
+                    const mItems = _marketData.slice(0, 4);
+                    const mGap   = 3;
+                    const mCardW = (CW - mGap * (mItems.length - 1)) / mItems.length;
+                    const mCardH = 24;
+
+                    mItems.forEach((idx, i) => {
+                        const mx  = M + i * (mCardW + mGap);
+                        const up  = idx.change >= 0;
+                        const clr = up ? PRI : RED;
+
+                        doc.setFillColor(...LBG);
+                        doc.roundedRect(mx, y, mCardW, mCardH, 2, 2, 'F');
+                        doc.setDrawColor(...LBR);
+                        doc.setLineWidth(0.25);
+                        doc.roundedRect(mx, y, mCardW, mCardH, 2, 2, 'S');
+
+                        // Coloured top bar
+                        doc.setFillColor(...clr);
+                        doc.roundedRect(mx, y, mCardW, 2, 0.5, 0.5, 'F');
+
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(6);
+                        doc.setTextColor(...MUT);
+                        doc.text(idx.name, mx + mCardW / 2, y + 7, { align: 'center' });
+
+                        let priceStr;
+                        if (idx.symbol === 'xauusd')
+                            priceStr = '$' + idx.price.toLocaleString('en-US', { maximumFractionDigits: 2 });
+                        else if (idx.symbol === 'usdinr')
+                            priceStr = 'Rs.' + idx.price.toFixed(2);
+                        else
+                            priceStr = idx.price.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(9);
+                        doc.setTextColor(...BLK);
+                        doc.text(priceStr, mx + mCardW / 2, y + 14, { align: 'center' });
+
+                        const arrow = up ? '+' : '-';
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(7);
+                        doc.setTextColor(...clr);
+                        doc.text(
+                            `${arrow} ${Math.abs(idx.change_percent).toFixed(2)}%  (${up ? '+' : ''}${idx.change.toFixed(2)})`,
+                            mx + mCardW / 2, y + 20, { align: 'center' }
+                        );
+                    });
+
+                    y += mCardH + 3;
+
+                    if (_marketData[0] && _marketData[0].last_updated) {
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(6.5);
+                        doc.setTextColor(...MUT);
+                        doc.text('Market data as of ' + _marketData[0].last_updated, M, y);
+                        y += 6;
+                    }
+                }
+
+                // ── GOAL PROJECTION (new page if needed) ──────────────────
+                if (_goalData) {
+                    const remaining = 297 - y - 10;
+                    if (remaining < 80) {
+                        doc.addPage();
+                        y = 20;
+                    }
+
+                    // Section header
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(7.5);
+                    doc.setTextColor(...MUT);
+                    doc.text('GOAL PROJECTION', M, y);
+                    doc.setDrawColor(...ACC);
+                    doc.setLineWidth(0.4);
+                    doc.line(M, y + 1.5, M + 38, y + 1.5);
+                    y += 7;
+
+                    // Goal box background
+                    const boxH = _goalData.monthsWithSIP ? 62 : 50;
+                    doc.setFillColor(...LBG);
+                    doc.roundedRect(M, y, CW, boxH, 3, 3, 'F');
+                    doc.setDrawColor(...LBR);
+                    doc.setLineWidth(0.25);
+                    doc.roundedRect(M, y, CW, boxH, 3, 3, 'S');
+
+                    // Target
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(9);
+                    doc.setTextColor(...BLK);
+                    doc.text('Target: ' + formatCurrencyRaw(_goalData.goalAmount), M + 5, y + 7);
+
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(7.5);
+                    doc.setTextColor(...MUT);
+                    doc.text(
+                        `Starting from ${formatCurrencyRaw(_currentValue)} · XIRR ${formatPercent(_overallXIRR)}`,
+                        M + 5, y + 13
+                    );
+
+                    // Progress bar
+                    const barY   = y + 18;
+                    const barW   = CW - 10;
+                    const barH   = 5;
+                    const filledW = Math.min(_goalData.progress / 100, 1) * barW;
+
+                    doc.setFillColor(...LBR);
+                    doc.roundedRect(M + 5, barY, barW, barH, 2, 2, 'F');
+                    doc.setFillColor(...PRI);
+                    if (filledW > 0) doc.roundedRect(M + 5, barY, filledW, barH, 2, 2, 'F');
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8);
+                    doc.setTextColor(...BLK);
+                    doc.text(
+                        `${_goalData.progress.toFixed(1)}% of goal reached`,
+                        M + 5 + barW / 2, barY + 4,
+                        { align: 'center' }
+                    );
+
+                    // Time boxes
+                    const tboxY = barY + 10;
+                    const tboxW = _goalData.monthsWithSIP ? (CW - 13) / 2 : CW - 10;
+
+                    // Without SIP box
+                    doc.setFillColor(...CARD);
+                    doc.roundedRect(M + 5, tboxY, tboxW, 18, 2, 2, 'F');
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(6.5);
+                    doc.setTextColor(...MUT);
+                    doc.text('WITHOUT ADDITIONAL SIP', M + 5 + tboxW / 2, tboxY + 5, { align: 'center' });
+                    doc.setFontSize(13);
+                    doc.setTextColor(...PRI);
+                    doc.text(fmtTime(_goalData.monthsNoSIP), M + 5 + tboxW / 2, tboxY + 13, { align: 'center' });
+
+                    // With SIP box
+                    if (_goalData.monthsWithSIP) {
+                        const tboxX2 = M + 5 + tboxW + 3;
+                        doc.setFillColor(...CARD);
+                        doc.roundedRect(tboxX2, tboxY, tboxW, 18, 2, 2, 'F');
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(6.5);
+                        doc.setTextColor(...MUT);
+                        doc.text(
+                            `WITH ${formatCurrencyRaw(_goalData.sipInput)}/MO SIP`,
+                            tboxX2 + tboxW / 2, tboxY + 5, { align: 'center' }
+                        );
+                        doc.setFontSize(13);
+                        doc.setTextColor(...ACC);
+                        doc.text(
+                            fmtTime(_goalData.monthsWithSIP),
+                            tboxX2 + tboxW / 2, tboxY + 13, { align: 'center' }
+                        );
+                    }
+
+                    y += boxH + 6;
+
+                    // Goal chart image
+                    const goalCanvas = document.getElementById('goalChart');
+                    if (goalCanvas && goalCanvas.style.display !== 'none') {
+                        const remaining2 = 297 - y - 10;
+                        if (remaining2 < 55) { doc.addPage(); y = 20; }
+                        const goalImg = goalCanvas.toDataURL('image/png', 1.0);
+                        doc.addImage(goalImg, 'PNG', M, y, CW, 60);
+                        y += 64;
+                    }
+                }
+
+                // ── FOOTER on every page ──────────────────────────────────
+                const totalPages = doc.internal.getNumberOfPages();
+                for (let p = 1; p <= totalPages; p++) {
+                    doc.setPage(p);
+                    doc.setFillColor(...BG);
+                    doc.rect(0, 287, W, 10, 'F');
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(7);
+                    doc.setTextColor(...DIM);
+                    doc.text('MF Dashboard · Confidential · For client use only', M, 292);
+                    doc.text(`Page ${p} of ${totalPages}`, W - M, 292, { align: 'right' });
+                }
+
+                const safeName = _clientName.replace(/[^a-zA-Z0-9]/g, '_');
+                doc.save(`Portfolio_${safeName}_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.pdf`);
+                showToast('PDF downloaded!', 'success');
+
+            } catch (err) {
+                console.error('[PDF] Error:', err);
+                showToast('PDF generation failed: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Download PDF';
+            }
+        }
+
         // ── Init ─────────────────────────────────────────────────────────
         (async function init() {
             const id = getClientID();
@@ -500,6 +1243,15 @@
                 return;
             }
             await Promise.all([loadClientInfo(id), loadPortfolio(id)]);
+            // Fetch SIP schedules and market data (non-critical, don't block UI)
+            const [sipRes, mktRes] = await Promise.allSettled([
+                fetch(`/api/clients/${id}/sip-schedules`),
+                fetch('/api/market/overview')
+            ]);
+            if (sipRes.status === 'fulfilled' && sipRes.value.ok)
+                _sipSchedules = await sipRes.value.json() || [];
+            if (mktRes.status === 'fulfilled' && mktRes.value.ok)
+                _marketData = await mktRes.value.json() || [];
         })();
     </script>
 </body>
