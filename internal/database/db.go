@@ -13,21 +13,26 @@ var DB *sql.DB
 
 // Initialize establishes database connection and runs migrations
 func Initialize() error {
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbUser := os.Getenv("DB_USER")
-	dbName := os.Getenv("DB_NAME")
-
-	log.Printf("Connecting to database: host=%s port=%s user=%s dbname=%s", dbHost, dbPort, dbUser, dbName)
-
-	connStr := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost,
-		dbPort,
-		dbUser,
-		os.Getenv("DB_PASSWORD"),
-		dbName,
-	)
+	// Prefer DATABASE_URL (set automatically by Render when a Postgres service is linked)
+	connStr := os.Getenv("DATABASE_URL")
+	if connStr == "" {
+		// Fallback to individual vars (local development)
+		sslMode := os.Getenv("DB_SSLMODE")
+		if sslMode == "" {
+			sslMode = "disable"
+		}
+		dbHost := os.Getenv("DB_HOST")
+		dbPort := os.Getenv("DB_PORT")
+		dbUser := os.Getenv("DB_USER")
+		dbName := os.Getenv("DB_NAME")
+		log.Printf("Connecting to database: host=%s port=%s user=%s dbname=%s sslmode=%s", dbHost, dbPort, dbUser, dbName, sslMode)
+		connStr = fmt.Sprintf(
+			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+			dbHost, dbPort, dbUser, os.Getenv("DB_PASSWORD"), dbName, sslMode,
+		)
+	} else {
+		log.Println("Connecting to database via DATABASE_URL")
+	}
 
 	var err error
 	DB, err = sql.Open("postgres", connStr)
