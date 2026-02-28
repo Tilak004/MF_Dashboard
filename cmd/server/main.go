@@ -3,6 +3,7 @@ package main
 import (
 	"client-dashboard/internal/database"
 	"client-dashboard/internal/handlers"
+	"client-dashboard/internal/models"
 	"client-dashboard/internal/services"
 	"client-dashboard/internal/utils"
 	"fmt"
@@ -38,6 +39,11 @@ func main() {
 	defer database.Close()
 
 	utils.LogInfo("Startup", "Database initialized successfully")
+
+	// Seed default admin user on first run (if no users exist)
+	if err := seedAdminUser(); err != nil {
+		log.Printf("Warning: could not seed admin user: %v", err)
+	}
 
 	// Start cron jobs
 	startCronJobs()
@@ -113,6 +119,30 @@ func main() {
 	utils.LogInfo("Startup", fmt.Sprintf("Server starting on port %s...", port))
 	utils.LogInfo("Startup", fmt.Sprintf("Dashboard: http://localhost:%s/dashboard", port))
 	log.Fatal(http.ListenAndServe(":"+port, loggedRouter))
+}
+
+// seedAdminUser creates the default admin account on first boot if no users exist
+func seedAdminUser() error {
+	var count int
+	database.DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if count > 0 {
+		return nil // users already exist, nothing to do
+	}
+
+	adminUser := os.Getenv("ADMIN_USERNAME")
+	adminPass := os.Getenv("ADMIN_PASSWORD")
+	if adminUser == "" {
+		adminUser = "admin"
+	}
+	if adminPass == "" {
+		adminPass = "admin123"
+	}
+
+	if _, err := models.CreateUser(database.DB, adminUser, adminPass, ""); err != nil {
+		return err
+	}
+	log.Printf("Default admin user created (username: %s)", adminUser)
+	return nil
 }
 
 // startCronJobs initializes and starts scheduled jobs
