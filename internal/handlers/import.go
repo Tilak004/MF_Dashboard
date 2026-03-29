@@ -6,6 +6,7 @@ import (
 	"client-dashboard/internal/services"
 	"client-dashboard/internal/utils"
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
@@ -134,6 +135,18 @@ func ImportTransactionsHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		if err != nil {
 			result.Errors = append(result.Errors, "Failed to calculate units for transaction: "+err.Error())
+			result.Failed++
+			continue
+		}
+
+		// Skip if same transaction already exists (prevent duplicate imports)
+		var existingCount int
+		database.DB.QueryRow(
+			`SELECT COUNT(*) FROM transactions WHERE client_id=$1 AND fund_id=$2 AND transaction_date=$3 AND amount=$4 AND transaction_type=$5`,
+			clientID, fundID, row.TransactionDate, row.Amount, row.TransactionType,
+		).Scan(&existingCount)
+		if existingCount > 0 {
+			result.Errors = append(result.Errors, fmt.Sprintf("Line skipped: duplicate transaction for %s on %s (%.0f)", row.ClientName, row.TransactionDate.Format("02-01-2006"), row.Amount))
 			result.Failed++
 			continue
 		}

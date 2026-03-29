@@ -93,6 +93,7 @@ func main() {
 	api.HandleFunc("/sip-schedules", handlers.GetAllSIPSchedulesHandler).Methods("GET")
 	api.HandleFunc("/sip-schedules", handlers.CreateSIPScheduleHandler).Methods("POST")
 	api.HandleFunc("/sip-schedules/{id}", handlers.UpdateSIPScheduleHandler).Methods("PUT")
+	api.HandleFunc("/sip-schedules/{id}", handlers.DeleteSIPScheduleHandler).Methods("DELETE")
 	api.HandleFunc("/sip-schedules/{id}/deactivate", handlers.DeactivateSIPScheduleHandler).Methods("POST")
 	api.HandleFunc("/clients/{clientId}/sip-schedules", handlers.GetSIPSchedulesByClientHandler).Methods("GET")
 	api.HandleFunc("/sip-installments", handlers.GetSIPInstallmentsHandler).Methods("GET")

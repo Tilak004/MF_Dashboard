@@ -176,6 +176,18 @@ func ImportSIPSchedulesHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Skip if a SIP already exists for same client + fund + start date (prevent duplicate imports)
+		var existingCount int
+		database.DB.QueryRow(
+			`SELECT COUNT(*) FROM sip_schedules WHERE client_id=$1 AND fund_id=$2 AND start_date=$3`,
+			clientID, fundID, startDate,
+		).Scan(&existingCount)
+		if existingCount > 0 {
+			result.Errors = append(result.Errors, fmt.Sprintf("Line %d: SIP already exists for %s - %s (skipped)", lineNum, clientName, fundName))
+			result.FailedCount++
+			continue
+		}
+
 		// Create SIP schedule
 		sipSchedule := &models.SIPSchedule{
 			ClientID:   clientID,

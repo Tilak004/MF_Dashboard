@@ -156,6 +156,11 @@
                 <div class="loading"></div>
             </div>
         </div>
+
+        <div class="card" id="sipCard" style="display:none;">
+            <h2>SIP Schedules</h2>
+            <div id="sipContainer"></div>
+        </div>
     </div>
 
     <script>
@@ -1248,11 +1253,61 @@
                 fetch(`/api/clients/${id}/sip-schedules`),
                 fetch('/api/market/overview')
             ]);
-            if (sipRes.status === 'fulfilled' && sipRes.value.ok)
+            if (sipRes.status === 'fulfilled' && sipRes.value.ok) {
                 _sipSchedules = await sipRes.value.json() || [];
+                renderSIPSchedules();
+            }
             if (mktRes.status === 'fulfilled' && mktRes.value.ok)
                 _marketData = await mktRes.value.json() || [];
         })();
+
+        function renderSIPSchedules() {
+            const card = document.getElementById('sipCard');
+            const container = document.getElementById('sipContainer');
+            if (!_sipSchedules || _sipSchedules.length === 0) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = '';
+            const rows = _sipSchedules.map(s => {
+                const date = new Date(s.start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                const statusBadge = s.is_active
+                    ? `<span style="color:var(--success);font-weight:600;">Active</span>`
+                    : `<span style="color:var(--text-muted);">Inactive</span>`;
+                return `<tr>
+                    <td>${s.fund_name || 'Fund #' + s.fund_id}</td>
+                    <td>₹${s.amount.toLocaleString('en-IN')}</td>
+                    <td>${s.frequency}</td>
+                    <td>${s.day_of_month}</td>
+                    <td>${date}</td>
+                    <td>${statusBadge}</td>
+                    <td><button onclick="deleteSIP(${s.id})" style="background:none;border:1px solid var(--danger,#ef4444);color:var(--danger,#ef4444);padding:2px 10px;border-radius:5px;cursor:pointer;font-size:0.78rem;">Delete</button></td>
+                </tr>`;
+            }).join('');
+            container.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">
+                <thead><tr style="border-bottom:1px solid var(--border);">
+                    <th style="text-align:left;padding:6px 8px;">Fund</th>
+                    <th style="text-align:left;padding:6px 8px;">Amount</th>
+                    <th style="text-align:left;padding:6px 8px;">Frequency</th>
+                    <th style="text-align:left;padding:6px 8px;">Day</th>
+                    <th style="text-align:left;padding:6px 8px;">Start Date</th>
+                    <th style="text-align:left;padding:6px 8px;">Status</th>
+                    <th style="padding:6px 8px;"></th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
+        }
+
+        async function deleteSIP(id) {
+            if (!confirm('Delete this SIP schedule? This cannot be undone.')) return;
+            const res = await fetch(`/api/sip-schedules/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                _sipSchedules = _sipSchedules.filter(s => s.id !== id);
+                renderSIPSchedules();
+            } else {
+                alert('Failed to delete SIP schedule.');
+            }
+        }
     </script>
 </body>
 </html>

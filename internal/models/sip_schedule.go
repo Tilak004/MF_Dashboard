@@ -6,16 +6,17 @@ import (
 )
 
 type SIPSchedule struct {
-	ID         int       `json:"id"`
-	ClientID   int       `json:"client_id"`
-	FundID     int       `json:"fund_id"`
-	Amount     float64   `json:"amount"`
-	StartDate  time.Time `json:"start_date"`
+	ID         int        `json:"id"`
+	ClientID   int        `json:"client_id"`
+	FundID     int        `json:"fund_id"`
+	FundName   string     `json:"fund_name"`
+	Amount     float64    `json:"amount"`
+	StartDate  time.Time  `json:"start_date"`
 	EndDate    *time.Time `json:"end_date,omitempty"`
-	Frequency  string    `json:"frequency"`   // MONTHLY, QUARTERLY
-	DayOfMonth int       `json:"day_of_month"` // 1-31
-	IsActive   bool      `json:"is_active"`
-	CreatedAt  time.Time `json:"created_at"`
+	Frequency  string     `json:"frequency"`   // MONTHLY, QUARTERLY
+	DayOfMonth int        `json:"day_of_month"` // 1-31
+	IsActive   bool       `json:"is_active"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 // CreateSIPSchedule inserts a new SIP schedule
@@ -78,13 +79,15 @@ func GetActiveSIPSchedules(db *sql.DB) ([]SIPSchedule, error) {
 	return sips, nil
 }
 
-// GetSIPSchedulesByClient retrieves all SIP schedules for a client
+// GetSIPSchedulesByClient retrieves all SIP schedules for a client, including fund name
 func GetSIPSchedulesByClient(db *sql.DB, clientID int) ([]SIPSchedule, error) {
 	query := `
-		SELECT id, client_id, fund_id, amount, start_date, end_date, frequency, day_of_month, is_active, created_at
-		FROM sip_schedules
-		WHERE client_id = $1
-		ORDER BY is_active DESC, start_date DESC
+		SELECT s.id, s.client_id, s.fund_id, COALESCE(f.scheme_name, ''), s.amount,
+		       s.start_date, s.end_date, s.frequency, s.day_of_month, s.is_active, s.created_at
+		FROM sip_schedules s
+		LEFT JOIN funds f ON f.id = s.fund_id
+		WHERE s.client_id = $1
+		ORDER BY s.is_active DESC, s.start_date DESC
 	`
 	rows, err := db.Query(query, clientID)
 	if err != nil {
@@ -96,8 +99,8 @@ func GetSIPSchedulesByClient(db *sql.DB, clientID int) ([]SIPSchedule, error) {
 	for rows.Next() {
 		var sip SIPSchedule
 		err := rows.Scan(
-			&sip.ID, &sip.ClientID, &sip.FundID, &sip.Amount, &sip.StartDate,
-			&sip.EndDate, &sip.Frequency, &sip.DayOfMonth, &sip.IsActive, &sip.CreatedAt,
+			&sip.ID, &sip.ClientID, &sip.FundID, &sip.FundName, &sip.Amount,
+			&sip.StartDate, &sip.EndDate, &sip.Frequency, &sip.DayOfMonth, &sip.IsActive, &sip.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -122,5 +125,11 @@ func UpdateSIPSchedule(db *sql.DB, sip *SIPSchedule) error {
 func DeactivateSIPSchedule(db *sql.DB, id int) error {
 	query := `UPDATE sip_schedules SET is_active = false WHERE id = $1`
 	_, err := db.Exec(query, id)
+	return err
+}
+
+// DeleteSIPSchedule permanently deletes a SIP schedule by ID
+func DeleteSIPSchedule(db *sql.DB, id int) error {
+	_, err := db.Exec(`DELETE FROM sip_schedules WHERE id = $1`, id)
 	return err
 }

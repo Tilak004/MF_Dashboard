@@ -144,6 +144,24 @@ func UpdateSIPScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
+// DeleteSIPScheduleHandler permanently deletes a SIP schedule
+func DeleteSIPScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	sipID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid SIP ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := models.DeleteSIPSchedule(database.DB, sipID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
 // DeactivateSIPScheduleHandler deactivates a SIP schedule
 func DeactivateSIPScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
