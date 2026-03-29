@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -30,76 +31,93 @@ type MarketIndex struct {
 	IsMarketOpen  bool    `json:"is_market_open"`
 }
 
-// ── NSE India ─────────────────────────────────────────────────────────────
+// ── Yahoo Finance ──────────────────────────────────────────────────────────
 
-type nseAllIndicesResp struct {
-	Data []struct {
-		IndexSymbol   string  `json:"indexSymbol"`
-		Index         string  `json:"index"`
-		Last          float64 `json:"last"`
-		Variation     float64 `json:"variation"`
-		PercentChange float64 `json:"percentChange"`
-	} `json:"data"`
-	Timestamp    string `json:"timestamp"`
-	MarketStatus struct {
-		MarketState string `json:"marketState"`
-	} `json:"marketStatus"`
+// yahooChartResp is the response from Yahoo Finance's v8 chart API.
+type yahooChartResp struct {
+	Chart struct {
+		Result []struct {
+			Meta struct {
+				RegularMarketPrice float64 `json:"regularMarketPrice"`
+				ChartPreviousClose float64 `json:"chartPreviousClose"`
+			} `json:"meta"`
+		} `json:"result"`
+	} `json:"chart"`
 }
 
-// wantedNSEIndices maps NSE indexSymbol → display name
-// Sensex is a BSE index and is not available from NSE's allIndices API.
-var wantedNSEIndices = map[string]string{
-	"NIFTY 50":   "Nifty 50",
-	"NIFTY BANK": "Bank Nifty",
+// indianIndices lists the Yahoo Finance symbols to fetch.
+var indianIndices = []struct {
+	symbol      string
+	displayName string
+}{
+	{"^NSEI", "Nifty 50"},
+	{"^NSEBANK", "Bank Nifty"},
+	{"^BSESN", "Sensex"},
 }
 
-// fetchNSEIndices hits NSE's allIndices public API.
-func fetchNSEIndices() ([]MarketIndex, bool, error) {
-	client := &http.Client{Timeout: 12 * time.Second}
-
-	apiReq, _ := http.NewRequest("GET", "https://www.nseindia.com/api/allIndices", nil)
-	apiReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	apiReq.Header.Set("Accept", "application/json, text/plain, */*")
-	apiReq.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	apiReq.Header.Set("Referer", "https://www.nseindia.com/")
-
-	apiResp, err := client.Do(apiReq)
-	if err != nil {
-		return nil, false, fmt.Errorf("NSE allIndices fetch failed: %w", err)
-	}
-	defer apiResp.Body.Close()
-
-	if apiResp.StatusCode != http.StatusOK {
-		return nil, false, fmt.Errorf("NSE allIndices returned HTTP %d", apiResp.StatusCode)
-	}
-
-	var nse nseAllIndicesResp
-	if err := json.NewDecoder(apiResp.Body).Decode(&nse); err != nil {
-		return nil, false, fmt.Errorf("failed to decode NSE response: %w", err)
-	}
-
-	isOpen := nse.MarketStatus.MarketState == "Open"
+// fetchYahooIndices fetches Indian indices from Yahoo Finance's v8 chart API.
+// Uses query2 + v8/chart which works from cloud servers without session cookies.
+func fetchYahooIndices() ([]MarketIndex, error) {
 	ist := time.FixedZone("IST", 5*3600+30*60)
-	lastUpdated := time.Now().In(ist).Format("02-Jan 15:04")
+	now := time.Now().In(ist)
+	isOpen := isNSEMarketOpen(now)
+	lastUpdated := now.Format("02-Jan 15:04")
 
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 	var result []MarketIndex
-	for _, d := range nse.Data {
-		displayName, ok := wantedNSEIndices[d.IndexSymbol]
-		if !ok {
-			continue
-		}
-		result = append(result, MarketIndex{
-			Name:          displayName,
-			Symbol:        d.IndexSymbol,
-			Price:         d.Last,
-			Change:        d.Variation,
-			ChangePercent: d.PercentChange,
-			LastUpdated:   lastUpdated,
-			IsMarketOpen:  isOpen,
-		})
+
+	for _, idx := range indianIndices {
+		idx := idx
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			// ^NSEI → %5ENSEI (^ must be percent-encoded in the path)
+			url := fmt.Sprintf("https://query2.finance.yahoo.com/v8/finance/chart/%%5E%s?interval=1d&range=2d",
+				idx.symbol[1:])
+
+			client := &http.Client{Timeout: 12 * time.Second}
+			req, _ := http.NewRequest("GET", url, nil)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+			req.Header.Set("Accept", "application/json")
+
+			resp, err := client.Do(req)
+			if err != nil || resp.StatusCode != http.StatusOK {
+				log.Printf("Yahoo Finance fetch failed for %s: %v", idx.symbol, err)
+				return
+			}
+			defer resp.Body.Close()
+
+			var yResp yahooChartResp
+			if err := json.NewDecoder(resp.Body).Decode(&yResp); err != nil || len(yResp.Chart.Result) == 0 {
+				log.Printf("Failed to decode Yahoo Finance response for %s: %v", idx.symbol, err)
+				return
+			}
+
+			meta := yResp.Chart.Result[0].Meta
+			change := meta.RegularMarketPrice - meta.ChartPreviousClose
+			changePct := 0.0
+			if meta.ChartPreviousClose > 0 {
+				changePct = (change / meta.ChartPreviousClose) * 100
+			}
+
+			mu.Lock()
+			result = append(result, MarketIndex{
+				Name:          idx.displayName,
+				Symbol:        idx.symbol,
+				Price:         meta.RegularMarketPrice,
+				Change:        change,
+				ChangePercent: changePct,
+				LastUpdated:   lastUpdated,
+				IsMarketOpen:  isOpen,
+			})
+			mu.Unlock()
+		}()
 	}
 
-	return result, isOpen, nil
+	wg.Wait()
+	return result, nil
 }
 
 // ── Stooq CSV ─────────────────────────────────────────────────────────────
@@ -202,19 +220,19 @@ func GetMarketOverviewHandler(w http.ResponseWriter, r *http.Request) {
 	var nseIndices []MarketIndex
 	var stooqResults []*MarketIndex
 
-	// Fetch NSE indices (Nifty 50, Bank Nifty, Sensex if available)
+	// Fetch Indian indices from Yahoo Finance (works from cloud servers)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		indices, _, err := fetchNSEIndices()
+		indices, err := fetchYahooIndices()
 		if err != nil {
-			utils.LogError("Market", fmt.Errorf("NSE fetch failed: %w", err))
+			utils.LogError("Market", fmt.Errorf("Yahoo Finance fetch failed: %w", err))
 			return
 		}
 		mu.Lock()
 		nseIndices = indices
 		mu.Unlock()
-		utils.LogInfo("Market", fmt.Sprintf("NSE returned %d indices", len(indices)))
+		utils.LogInfo("Market", fmt.Sprintf("Yahoo Finance returned %d indices", len(indices)))
 	}()
 
 	// Fetch Gold from Stooq
